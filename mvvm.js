@@ -21,7 +21,28 @@ function Mvvm(options = {}) {
            }
        })
    }
+   initComputed.call(this)
    new Compile(options.el,this)
+}
+
+function initComputed() {   
+    //具有缓存功能
+    //不需要观察者，它的值只依赖用户在computed里面定义的函数值/对象值，当发生改变的时候才会触发computed里面的函数/对象
+    let vm = this   //默认保存一下this
+    let computed = this.$options.computed  //从options上拿到computed属性  
+    //方法：Objected.keys  可以把对象obj={name:1,age:2}变成数组[name,age]
+    Object.keys(computed).forEach(function (key){
+        Object.defineProperty(vm,key,{   //取出computed[key]
+            enumerable:true,
+            //这里判断computed里面的key是对象还是函数
+            //如果是函数，直接调用get方法  如sum(){return this.a+this.b},他们获取a和b的值就会调用get方法
+            //如果是对象，需要手动去调用该对象的get方法
+            //所以不需要new Watcher去监听变化
+            get:typeof computed[key]==='function'?computed[key]:computed[key].get,  
+            set(){
+            }
+        })
+    })
 }
 
 function Compile(el,vm) {
@@ -40,7 +61,8 @@ function Compile(el,vm) {
         Array.from(fragment.childNodes).forEach(function (node) {//循环每一层
             var text = node.textContent
             var reg = /\{\{(.*)\}\}/    //正则匹配{{ }}
-            if(node.nodeType===3 &&reg.test(text)){//即是文本节点又有大括号的情况
+            //{{}}的实现
+            if(node.nodeType===3 &&reg.test(text)){//既是文本节点又有大括号的情况
                 let arr = RegExp.$1.split('.') //[a,a]  [b]
                 let val = vm
                 arr.forEach(function (k) {  //取this.a.a  this.b
@@ -52,8 +74,32 @@ function Compile(el,vm) {
                 //替换的逻辑
                 node.textContent = text.replace(/\{\{(.*)\}\}/,val)
             }
+
+            //v-model的实现
+            if(node.nodeType===1){
+                //元素节点
+                let nodeAttrs = node.attributes  //获取当前DOM节点的属性
+                //将类数组转换为数组并遍历
+                Array.from(nodeAttrs).forEach(function (attr) {
+                    let name = attr.name        //属性名字：type  v-mode
+                    let exp = attr.value        //属性的值：text  b
+                    if(name.indexOf('v-')==0){  //以v-开头：v-model
+                        node.value = vm[exp]    //this.b为  '是b'
+                    }
+                    //监听变化 每次更改值，就应该改变
+                    new Watcher(vm,exp,function (newVal) {
+                        node.value = newVal    //当watcher触发时，会自动将内容放到输入框内
+                    })
+                    node.addEventListener('input',function (e) {
+                        let newVal = e.target.value
+                        //相当于给this.b赋了一个新值
+                        //而值的改变会调用set，set中又会调用notify，notify中调用watcher的update方法实现了更新
+                        vm[exp] = newVal
+                    })
+                })
+            }
             //如果还有子节点，继续递归replace
-            if(node.childNodes){
+            if(node.childNodes && node.childNodes.length){
                 replace(node)
             }
         })
@@ -116,7 +162,6 @@ function observe(data) {
     Watcher是一个监听函数  
     现在我们要订阅一个事件，当数据改变需要重新刷新视图，这就需要在replace替换的逻辑里来处理
     通过在replace里面new Watcher把数据订阅一下，数据一变就执行改变内容的操作
-
 */
 
 //绑定的方法 都有一个update属性 每个sub里面都有一个update方法
